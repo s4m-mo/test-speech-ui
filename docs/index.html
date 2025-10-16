@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text to Speech</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles for the app */
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent; /* Removes blue tap highlight on mobile */
+        }
+
+        /* Gradient border button style */
+        .gradient-border-button {
+            background: linear-gradient(to right, #1f2937, #1f2937) padding-box,
+                        linear-gradient(to right, #ef4444, #f59e0b) border-box;
+            border: 2px solid transparent;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .gradient-border-button:hover, .gradient-border-button:focus {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+        
+        .preset-item {
+             transition: background-color 0.2s ease-in-out, transform 0.2s ease-in-out;
+        }
+
+        .preset-item:active {
+            transform: scale(0.98);
+            background-color: #374151;
+        }
+
+        /* Custom scrollbar for a cleaner look */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex flex-col h-full overflow-hidden">
+
+    <!-- Header for Voice Selection -->
+    <header class="p-4 bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 w-full z-20">
+        <label for="voiceSelect" class="block mb-2 text-sm font-medium text-gray-400">Select Voice:</label>
+        <select id="voiceSelect" class="w-full bg-gray-800 border border-gray-600 text-white text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block p-2.5">
+            <!-- Voice options will be populated by JavaScript -->
+        </select>
+    </header>
+
+    <!-- Main content for preset list -->
+    <main id="presetsContainer" class="flex-grow overflow-y-auto p-4 pb-28">
+        <div id="presetsList" class="space-y-3">
+            <!-- Preset items will be populated by JavaScript -->
+            <p id="noPresetsMessage" class="text-center text-gray-500 mt-8">No presets added yet. Use the "Add" button below to create one.</p>
+        </div>
+    </main>
+
+    <!-- Modal for user input -->
+    <div id="inputModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
+            <div class="p-5">
+                <h2 id="modalTitle" class="text-lg font-bold text-center mb-4">Modal Title</h2>
+                <input type="text" id="textInput" class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg p-3 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition" placeholder="Enter text here...">
+            </div>
+            <div class="grid grid-cols-2 gap-px bg-gray-700 rounded-b-xl overflow-hidden">
+                <button id="cancelButton" class="bg-gray-800 hover:bg-gray-700 text-gray-300 py-3 font-semibold transition">Cancel</button>
+                <button id="submitButton" class="bg-gray-800 hover:bg-gray-700 text-yellow-400 py-3 font-semibold transition">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pinned Bottom Navigation -->
+    <footer class="fixed bottom-0 left-0 right-0 bg-gray-900/80 backdrop-blur-sm border-t border-gray-700 z-20">
+        <div class="grid grid-cols-2 gap-4 p-4 max-w-lg mx-auto">
+            <button id="addButton" class="gradient-border-button font-bold py-3 px-4 rounded-full shadow-lg">
+                Add Preset
+            </button>
+            <button id="typeButton" class="gradient-border-button font-bold py-3 px-4 rounded-full shadow-lg">
+                Type
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM element references
+            const voiceSelect = document.getElementById('voiceSelect');
+            const presetsList = document.getElementById('presetsList');
+            const noPresetsMessage = document.getElementById('noPresetsMessage');
+            const addButton = document.getElementById('addButton');
+            const typeButton = document.getElementById('typeButton');
+            const inputModal = document.getElementById('inputModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const textInput = document.getElementById('textInput');
+            const cancelButton = document.getElementById('cancelButton');
+            const submitButton = document.getElementById('submitButton');
+
+            // App state
+            let voices = [];
+            let presets = JSON.parse(localStorage.getItem('tts_presets')) || [];
+            let currentAction = null; // Can be 'add' or 'type'
+
+            // --- Core Speech Synthesis Functions ---
+
+            function populateVoiceList() {
+                voices = speechSynthesis.getVoices();
+                voiceSelect.innerHTML = ''; // Clear existing options
+                if (voices.length === 0) {
+                    const option = document.createElement('option');
+                    option.textContent = 'No voices available';
+                    voiceSelect.appendChild(option);
+                    return;
+                }
+                voices.forEach(voice => {
+                    const option = document.createElement('option');
+                    option.textContent = `${voice.name} (${voice.lang})`;
+                    option.setAttribute('data-lang', voice.lang);
+                    option.setAttribute('data-name', voice.name);
+                    voiceSelect.appendChild(option);
+                });
+            }
+
+            function speak(text) {
+                if (speechSynthesis.speaking) {
+                    speechSynthesis.cancel();
+                }
+                if (text.trim() !== '') {
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    const selectedVoiceName = voiceSelect.selectedOptions[0].getAttribute('data-name');
+                    const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
+                    if (selectedVoice) {
+                        utterance.voice = selectedVoice;
+                    }
+                    speechSynthesis.speak(utterance);
+                }
+            }
+
+            // --- UI Rendering ---
+
+            function deletePreset(index) {
+                presets.splice(index, 1);
+                localStorage.setItem('tts_presets', JSON.stringify(presets));
+                renderPresets();
+            }
+
+            function renderPresets() {
+                presetsList.innerHTML = ''; // Clear the list before rendering
+                if (presets.length === 0) {
+                    presetsList.appendChild(noPresetsMessage);
+                    noPresetsMessage.style.display = 'block';
+                } else {
+                    noPresetsMessage.style.display = 'none';
+                    presets.forEach((presetText, index) => {
+                        const presetDiv = document.createElement('div');
+                        presetDiv.className = 'preset-item bg-gray-800 p-4 rounded-lg cursor-pointer flex justify-between items-center';
+
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = presetText;
+                        textSpan.className = 'flex-grow mr-4';
+
+                        const deleteButton = document.createElement('button');
+                        deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>`;
+                        deleteButton.className = 'text-gray-500 hover:text-red-400 focus:outline-none transition-colors flex-shrink-0';
+                        deleteButton.title = 'Delete preset';
+                        
+                        deleteButton.addEventListener('click', (e) => {
+                            e.stopPropagation(); // Prevent the speak event from firing
+                            deletePreset(index);
+                        });
+
+                        presetDiv.appendChild(textSpan);
+                        presetDiv.appendChild(deleteButton);
+                        
+                        presetDiv.addEventListener('click', () => {
+                            speak(presetText);
+                        });
+
+                        presetsList.appendChild(presetDiv);
+                    });
+                }
+            }
+
+            // --- Modal Handling ---
+
+            function showModal(action, title, placeholder) {
+                currentAction = action;
+                modalTitle.textContent = title;
+                textInput.placeholder = placeholder;
+                textInput.value = '';
+                inputModal.classList.remove('hidden');
+                setTimeout(() => textInput.focus(), 100); // Focus after transition
+            }
+
+            function hideModal() {
+                inputModal.classList.add('hidden');
+                currentAction = null;
+            }
+
+            function handleSubmit() {
+                const text = textInput.value.trim();
+                if (text) {
+                    if (currentAction === 'add') {
+                        presets.push(text);
+                        localStorage.setItem('tts_presets', JSON.stringify(presets));
+                        renderPresets();
+                    } else if (currentAction === 'type') {
+                        speak(text);
+                    }
+                }
+                hideModal();
+            }
+
+            // --- Event Listeners ---
+
+            // Initial setup
+            populateVoiceList();
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = populateVoiceList;
+            }
+            renderPresets();
+
+            // Button clicks
+            addButton.addEventListener('click', () => {
+                showModal('add', 'Add a New Preset', 'E.g., "Hello, world!"');
+            });
+
+            typeButton.addEventListener('click', () => {
+                showModal('type', 'Type Text to Speak', 'Type anything here...');
+            });
+            
+            cancelButton.addEventListener('click', hideModal);
+            submitButton.addEventListener('click', handleSubmit);
+
+            // Allow submitting with Enter key
+            textInput.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') {
+                    handleSubmit();
+                }
+            });
+            
+            // Close modal on background click
+            inputModal.addEventListener('click', (e) => {
+                if (e.target === inputModal) {
+                    hideModal();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+
