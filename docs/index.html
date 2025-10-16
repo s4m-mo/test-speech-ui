@@ -12,7 +12,7 @@
         /* Custom styles for the app */
         body {
             font-family: 'Inter', sans-serif;
-            -webkit-tap-highlight-color: transparent; /* Removes blue tap highlight on mobile */
+            -webkit-tap-highlight-color: transparent;
         }
 
         /* Gradient border button style */
@@ -23,18 +23,24 @@
             color: white;
             transition: all 0.3s ease;
         }
-
-        .gradient-border-button:hover, .gradient-border-button:focus {
+        .gradient-border-button:focus {
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
         
         .preset-item {
-             transition: background-color 0.2s ease-in-out, transform 0.2s ease-in-out;
+             /* Added transition for smooth reordering */
+             transition: all 0.2s ease-in-out;
         }
 
         .preset-item:active {
             transform: scale(0.98);
+            background-color: #374151;
+        }
+
+        /* Style for when an item is being dragged */
+        .dragging {
+            opacity: 0.5;
             background-color: #374151;
         }
 
@@ -72,7 +78,7 @@
         </div>
     </main>
 
-    <!-- Modal for user input -->
+    <!-- Modal for adding/editing presets -->
     <div id="inputModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50 hidden">
         <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm border border-gray-700">
             <div class="p-5">
@@ -88,12 +94,10 @@
 
     <!-- Pinned Bottom Navigation -->
     <footer class="fixed bottom-0 left-0 right-0 bg-gray-900/80 backdrop-blur-sm border-t border-gray-700 z-20">
-        <div class="grid grid-cols-2 gap-4 p-4 max-w-lg mx-auto">
-            <button id="addButton" class="gradient-border-button font-bold py-3 px-4 rounded-full shadow-lg">
-                Add Preset
-            </button>
-            <button id="typeButton" class="gradient-border-button font-bold py-3 px-4 rounded-full shadow-lg">
-                Type
+        <div class="flex items-center gap-3 p-3 max-w-lg mx-auto">
+            <input type="text" id="typeInput" class="flex-grow w-full bg-gray-800 border border-gray-600 text-white rounded-full p-3 pl-5 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition" placeholder="Type and press Enter to speak...">
+            <button id="addButton" class="gradient-border-button font-bold py-3 px-5 rounded-full shadow-lg flex-shrink-0">
+                Add
             </button>
         </div>
     </footer>
@@ -105,7 +109,7 @@
             const presetsList = document.getElementById('presetsList');
             const noPresetsMessage = document.getElementById('noPresetsMessage');
             const addButton = document.getElementById('addButton');
-            const typeButton = document.getElementById('typeButton');
+            const typeInput = document.getElementById('typeInput');
             const inputModal = document.getElementById('inputModal');
             const modalTitle = document.getElementById('modalTitle');
             const textInput = document.getElementById('textInput');
@@ -115,13 +119,14 @@
             // App state
             let voices = [];
             let presets = JSON.parse(localStorage.getItem('tts_presets')) || [];
-            let currentAction = null; // Can be 'add' or 'type'
+            let currentAction = null; // Can be 'add' or 'edit'
+            let editingIndex = null; // To track which preset is being edited
+            let draggedItem = null; // To track the element being dragged
 
             // --- Core Speech Synthesis Functions ---
-
             function populateVoiceList() {
                 voices = speechSynthesis.getVoices();
-                voiceSelect.innerHTML = ''; // Clear existing options
+                voiceSelect.innerHTML = ''; 
                 if (voices.length === 0) {
                     const option = document.createElement('option');
                     option.textContent = 'No voices available';
@@ -131,7 +136,7 @@
                 voices.forEach((voice, index) => {
                     const option = document.createElement('option');
                     option.textContent = `${voice.name} (${voice.lang})`;
-                    option.value = index; // Use the voice's index as the value
+                    option.value = index;
                     voiceSelect.appendChild(option);
                 });
             }
@@ -143,7 +148,6 @@
                 if (text.trim() !== '') {
                     const utterance = new SpeechSynthesisUtterance(text);
                     const selectedVoiceIndex = voiceSelect.value;
-                    // Directly use the index to find the voice object
                     if (voices[selectedVoiceIndex]) {
                         utterance.voice = voices[selectedVoiceIndex];
                     }
@@ -153,14 +157,12 @@
 
             // --- UI Rendering ---
 
-            function deletePreset(index) {
-                presets.splice(index, 1);
+            function savePresets() {
                 localStorage.setItem('tts_presets', JSON.stringify(presets));
-                renderPresets();
             }
 
             function renderPresets() {
-                presetsList.innerHTML = ''; // Clear the list before rendering
+                presetsList.innerHTML = '';
                 if (presets.length === 0) {
                     presetsList.appendChild(noPresetsMessage);
                     noPresetsMessage.style.display = 'block';
@@ -168,28 +170,41 @@
                     noPresetsMessage.style.display = 'none';
                     presets.forEach((presetText, index) => {
                         const presetDiv = document.createElement('div');
-                        presetDiv.className = 'preset-item bg-gray-800 p-4 rounded-lg cursor-pointer flex justify-between items-center';
+                        presetDiv.className = 'preset-item bg-gray-800 p-2 pl-4 rounded-lg flex justify-between items-center';
+                        presetDiv.setAttribute('draggable', true);
+                        presetDiv.dataset.index = index;
 
                         const textSpan = document.createElement('span');
                         textSpan.textContent = presetText;
-                        textSpan.className = 'flex-grow mr-4';
+                        textSpan.className = 'flex-grow cursor-pointer';
+                        textSpan.onclick = () => speak(presetText);
+                        
+                        const buttonsContainer = document.createElement('div');
+                        buttonsContainer.className = 'flex items-center flex-shrink-0';
+                        
+                        // Edit Button
+                        const editButton = document.createElement('button');
+                        editButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>`;
+                        editButton.className = 'p-2 text-gray-500 hover:text-yellow-400 focus:outline-none transition-colors';
+                        editButton.onclick = (e) => { e.stopPropagation(); showModal('edit', 'Edit Preset', presetText, index); };
 
+                        // Delete Button
                         const deleteButton = document.createElement('button');
-                        deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>`;
-                        deleteButton.className = 'text-gray-500 hover:text-red-400 focus:outline-none transition-colors flex-shrink-0';
-                        deleteButton.title = 'Delete preset';
+                        deleteButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>`;
+                        deleteButton.className = 'p-2 text-gray-500 hover:text-red-400 focus:outline-none transition-colors';
+                        deleteButton.onclick = (e) => { e.stopPropagation(); presets.splice(index, 1); savePresets(); renderPresets(); };
                         
-                        deleteButton.addEventListener('click', (e) => {
-                            e.stopPropagation(); // Prevent the speak event from firing
-                            deletePreset(index);
-                        });
+                        // Drag Handle
+                        const dragHandle = document.createElement('div');
+                        dragHandle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>`;
+                        dragHandle.className = 'p-2 text-gray-500 cursor-move';
 
-                        presetDiv.appendChild(textSpan);
-                        presetDiv.appendChild(deleteButton);
+                        buttonsContainer.appendChild(editButton);
+                        buttonsContainer.appendChild(deleteButton);
+                        buttonsContainer.appendChild(dragHandle);
                         
-                        presetDiv.addEventListener('click', () => {
-                            speak(presetText);
-                        });
+                        presetDiv.appendChild(textSpan);
+                        presetDiv.appendChild(buttonsContainer);
 
                         presetsList.appendChild(presetDiv);
                     });
@@ -197,19 +212,19 @@
             }
 
             // --- Modal Handling ---
-
-            function showModal(action, title, placeholder) {
+            function showModal(action, title, value = '', index = null) {
                 currentAction = action;
+                editingIndex = index;
                 modalTitle.textContent = title;
-                textInput.placeholder = placeholder;
-                textInput.value = '';
+                textInput.value = value;
                 inputModal.classList.remove('hidden');
-                setTimeout(() => textInput.focus(), 100); // Focus after transition
+                setTimeout(() => textInput.focus(), 100);
             }
 
             function hideModal() {
                 inputModal.classList.add('hidden');
                 currentAction = null;
+                editingIndex = null;
             }
 
             function handleSubmit() {
@@ -217,48 +232,99 @@
                 if (text) {
                     if (currentAction === 'add') {
                         presets.push(text);
-                        localStorage.setItem('tts_presets', JSON.stringify(presets));
-                        renderPresets();
-                    } else if (currentAction === 'type') {
-                        speak(text);
+                    } else if (currentAction === 'edit' && editingIndex !== null) {
+                        presets[editingIndex] = text;
                     }
+                    savePresets();
+                    renderPresets();
                 }
                 hideModal();
             }
 
             // --- Event Listeners ---
-
-            // Initial setup
             populateVoiceList();
             if (speechSynthesis.onvoiceschanged !== undefined) {
                 speechSynthesis.onvoiceschanged = populateVoiceList;
             }
             renderPresets();
 
-            // Button clicks
-            addButton.addEventListener('click', () => {
-                showModal('add', 'Add a New Preset', 'E.g., "Hello, world!"');
+            // --- Delegated Drag and Drop Event Listeners on the list container ---
+            presetsList.addEventListener('dragstart', e => {
+                const target = e.target.closest('.preset-item');
+                if (target) {
+                    draggedItem = target;
+                    // Use a short timeout to allow the browser to create the drag image
+                    setTimeout(() => {
+                        draggedItem.classList.add('dragging');
+                    }, 0);
+                }
             });
 
-            typeButton.addEventListener('click', () => {
-                showModal('type', 'Type Text to Speak', 'Type anything here...');
+            presetsList.addEventListener('dragend', () => {
+                if (draggedItem) {
+                    draggedItem.classList.remove('dragging');
+                    draggedItem = null;
+                }
+            });
+
+            presetsList.addEventListener('dragover', e => {
+                e.preventDefault(); // Necessary to allow dropping
+                if (!draggedItem) return;
+
+                const overElement = e.target.closest('.preset-item');
+                if (!overElement || overElement === draggedItem) return;
+
+                const rect = overElement.getBoundingClientRect();
+                // Check if the cursor is in the top half or bottom half of the item being hovered over
+                const offsetY = e.clientY - rect.top - rect.height / 2;
+
+                if (offsetY < 0) {
+                    // Insert before the hovered element
+                    presetsList.insertBefore(draggedItem, overElement);
+                } else {
+                    // Insert after the hovered element
+                    presetsList.insertBefore(draggedItem, overElement.nextSibling);
+                }
+            });
+
+            presetsList.addEventListener('drop', e => {
+                e.preventDefault();
+                if (!draggedItem) return;
+                
+                // The visual reorder is done, now we sync the data array
+                const newOrderedElements = [...presetsList.querySelectorAll('.preset-item')];
+                const newPresets = newOrderedElements.map(item => item.querySelector('span').textContent);
+
+                presets = newPresets;
+                savePresets();
+                // Re-render to normalize state and ensure event listeners have correct indexes
+                renderPresets();
+            });
+
+
+            addButton.addEventListener('click', () => {
+                showModal('add', 'Add New Preset', '');
+            });
+
+            typeInput.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') {
+                    const text = typeInput.value.trim();
+                    if (text) {
+                        speak(text);
+                        typeInput.value = '';
+                    }
+                }
             });
             
             cancelButton.addEventListener('click', hideModal);
             submitButton.addEventListener('click', handleSubmit);
 
-            // Allow submitting with Enter key
             textInput.addEventListener('keyup', (e) => {
-                if (e.key === 'Enter') {
-                    handleSubmit();
-                }
+                if (e.key === 'Enter') handleSubmit();
             });
             
-            // Close modal on background click
             inputModal.addEventListener('click', (e) => {
-                if (e.target === inputModal) {
-                    hideModal();
-                }
+                if (e.target === inputModal) hideModal();
             });
         });
     </script>
