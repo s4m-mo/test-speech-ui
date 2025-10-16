@@ -128,11 +128,10 @@
                     voiceSelect.appendChild(option);
                     return;
                 }
-                voices.forEach(voice => {
+                voices.forEach((voice, index) => {
                     const option = document.createElement('option');
                     option.textContent = `${voice.name} (${voice.lang})`;
-                    option.setAttribute('data-lang', voice.lang);
-                    option.setAttribute('data-name', voice.name);
+                    option.value = index; // Use the voice's index as the value
                     voiceSelect.appendChild(option);
                 });
             }
@@ -143,10 +142,10 @@
                 }
                 if (text.trim() !== '') {
                     const utterance = new SpeechSynthesisUtterance(text);
-                    const selectedVoiceName = voiceSelect.selectedOptions[0].getAttribute('data-name');
-                    const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
-                    if (selectedVoice) {
-                        utterance.voice = selectedVoice;
+                    const selectedVoiceIndex = voiceSelect.value;
+                    // Directly use the index to find the voice object
+                    if (voices[selectedVoiceIndex]) {
+                        utterance.voice = voices[selectedVoiceIndex];
                     }
                     speechSynthesis.speak(utterance);
                 }
@@ -265,4 +264,5 @@
     </script>
 </body>
 </html>
+
 
